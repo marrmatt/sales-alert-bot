@@ -1,6 +1,5 @@
 from dotenv import load_dotenv
-load_dotenv()                     # ← This reads your .env file automatically
-
+load_dotenv()
 import os
 import json
 import time
@@ -38,7 +37,7 @@ def set_threshold(message):
             json.dump(config, f)
         bot.reply_to(message, f"Threshold set to {thresh}. Alerts only for quantity > {thresh}.")
     except (IndexError, ValueError):
-        bot.reply_to(message, "Usage: /set_threshold <number>   (example: /set_threshold 10)")
+        bot.reply_to(message, "Usage: /set_threshold <number> (example: /set_threshold 10)")
 
 # ---------- Google Sheets ----------
 scope = [
@@ -48,47 +47,39 @@ scope = [
     "https://www.googleapis.com/auth/drive"
 ]
 
-creds = ServiceAccountCredentials.from_json_keyfile_name('creds.json', scope)
-client = gspread.authorize(creds)
+# NEW: Safe way for Railway – use GOOGLE_CREDENTIALS from environment
+if os.environ.get('GOOGLE_CREDENTIALS'):
+    creds_dict = json.loads(os.environ['GOOGLE_CREDENTIALS'])
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+else:
+    creds = ServiceAccountCredentials.from_json_keyfile_name('creds.json', scope)
 
-# ← THIS LINE IS NOW CORRECT
-sheet = client.open_by_url(os.environ['SHEET_URL']).sheet1   # change .sheet1 → .worksheet("Your Tab Name") if needed
+client = gspread.authorize(creds)
+sheet = client.open_by_url(os.environ['SHEET_URL']).sheet1   # change to .worksheet("Sheet2") if needed
 
 # ---------- Monitoring new rows ----------
 def monitor_sheet():
     all_values = sheet.get_all_values()
-    last_row_count = len(all_values)  # Start from current row count
-
+    last_row_count = len(all_values)
     print(f"Monitoring started. Initial row count: {last_row_count}")
-
     while True:
         time.sleep(10)
         all_values = sheet.get_all_values()
         current_row_count = len(all_values)
-
-        print(f"Checking rows... Last: {last_row_count}, Current: {current_row_count}")
-
         if current_row_count > last_row_count:
             for i in range(last_row_count + 1, current_row_count + 1):
-                row = all_values[i - 1]  # Adjust for 0-based index
-                print("New row detected:", row)
-
+                row = all_values[i - 1]
                 if len(row) >= 3 and row[0].strip():
                     product = row[0].strip()
                     try:
                         quantity = int(row[1].strip())
                     except (ValueError, IndexError):
-                        print("Skipping row due to invalid quantity:", row)
                         continue
                     customer = row[2].strip()
-
                     if quantity > config['threshold'] and config['chat_id']:
                         msg = f"New sale!\nProduct: {product}\nQuantity: {quantity}\nCustomer: {customer}"
                         bot.send_message(config['chat_id'], msg)
                         print("Alert sent:", msg)
-                    else:
-                        print("Row skipped due to threshold or missing chat_id.")
-
             last_row_count = current_row_count
 
 # ---------- Start everything ----------
